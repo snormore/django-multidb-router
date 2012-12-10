@@ -37,6 +37,8 @@ from .pinning import this_thread_is_pinned, db_write
 
 DEFAULT_DB_ALIAS = 'default'
 
+MASTER_DATABASE = getattr(settings, 'MASTER_DATABASE', DEFAULT_DB_ALIAS)
+MASTER_DB_ALLOW_SYNC = getattr(settings, 'MASTER_DB_ALLOW_SYNC', True)
 
 if getattr(settings, 'SLAVE_DATABASES'):
     # Shuffle the list so the first slave db isn't slammed during startup.
@@ -45,9 +47,12 @@ if getattr(settings, 'SLAVE_DATABASES'):
     slaves = itertools.cycle(dbs)
     # Set the slaves as test mirrors of the master.
     for db in dbs:
-        settings.DATABASES[db]['TEST_MIRROR'] = DEFAULT_DB_ALIAS
+        settings.DATABASES[db]['TEST_MIRROR'] = MASTER_DATABASE
 else:
-    slaves = itertools.repeat(DEFAULT_DB_ALIAS)
+    slaves = itertools.repeat(MASTER_DATABASE)
+
+apps = getattr(settings, 'MULTIDB_APPS', None)
+
 
 
 def get_slave():
@@ -60,11 +65,11 @@ class MasterSlaveRouter(object):
 
     def db_for_read(self, model, **hints):
         """Send reads to slaves in round-robin."""
-        return get_slave()
+        return None if apps and model._meta.app_label not in apps else get_slave()
 
     def db_for_write(self, model, **hints):
         """Send all writes to the master."""
-        return DEFAULT_DB_ALIAS
+        return None if apps and model._meta.app_label not in apps else MASTER_DATABASE
 
     def allow_relation(self, obj1, obj2, **hints):
         """Allow all relations, so FK validation stays quiet."""
@@ -72,7 +77,7 @@ class MasterSlaveRouter(object):
 
     def allow_syncdb(self, db, model):
         """Only allow syncdb on the master."""
-        return db == DEFAULT_DB_ALIAS
+        return db == MASTER_DATABASE and MASTER_DB_ALLOW_SYNC
 
 
 class PinningMasterSlaveRouter(MasterSlaveRouter):
@@ -87,4 +92,6 @@ class PinningMasterSlaveRouter(MasterSlaveRouter):
     def db_for_read(self, model, **hints):
         """Send reads to slaves in round-robin unless this thread is "stuck" to
         the master."""
-        return DEFAULT_DB_ALIAS if this_thread_is_pinned() else get_slave()
+        if apps and model._meta.app_label not in apps:
+            return None
+        return MASTER_DATABASE if this_thread_is_pinned() else get_slave()

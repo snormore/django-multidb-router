@@ -3,13 +3,24 @@ from django.test import TestCase
 
 from nose.tools import eq_
 
-from multidb import (DEFAULT_DB_ALIAS, MasterSlaveRouter,
+import multidb
+from multidb import (DEFAULT_DB_ALIAS, MASTER_DATABASE, MASTER_DB_ALLOW_SYNC, MasterSlaveRouter,
     PinningMasterSlaveRouter, get_slave)
 from multidb.middleware import (PINNING_COOKIE, PINNING_SECONDS,
     PinningRouterMiddleware)
 from multidb.pinning import (this_thread_is_pinned,
     pin_this_thread, unpin_this_thread, use_master, db_write)
 
+from multidb.tests.myapp.models import TestModel
+
+from django.conf import settings
+
+def load_setting(name, value):
+    setattr(settings, name, value)
+    reload(multidb)
+def clear_setting(name):
+    delattr(settings, name)
+    reload(multidb)
 
 class UnpinningTestCase(TestCase):
     """Test case that unpins the thread on tearDown"""
@@ -22,18 +33,40 @@ class MasterSlaveRouterTests(TestCase):
     """Tests for MasterSlaveRouter"""
 
     def test_db_for_read(self):
-        eq_(MasterSlaveRouter().db_for_read(None), get_slave())
+        eq_(MasterSlaveRouter().db_for_read(TestModel), get_slave())
         # TODO: Test the round-robin functionality.
 
+    def test_db_for_read_allowed_apps(self):
+        load_setting('MULTIDB_APPS', ['myapp'])
+        eq_(MasterSlaveRouter().db_for_read(TestModel), get_slave())
+        load_setting('MULTIDB_APPS', ['anotherapp'])
+        assert not MasterSlaveRouter().db_for_read(TestModel)
+        clear_setting('MULTIDB_APPS')
+
     def test_db_for_write(self):
-        eq_(MasterSlaveRouter().db_for_write(None), DEFAULT_DB_ALIAS)
+        eq_(MasterSlaveRouter().db_for_write(TestModel), MASTER_DATABASE)
+
+    def test_db_for_write_allowed_apps(self):
+        load_setting('MULTIDB_APPS', ['myapp'])
+        eq_(MasterSlaveRouter().db_for_write(TestModel), MASTER_DATABASE)
+        load_setting('MULTIDB_APPS', ['anotherapp'])
+        assert not MasterSlaveRouter().db_for_write(TestModel)
+        clear_setting('MULTIDB_APPS')
 
     def test_allow_syncdb(self):
         """Make sure allow_syncdb() does the right thing for both masters and
         slaves"""
         router = MasterSlaveRouter()
-        assert router.allow_syncdb(DEFAULT_DB_ALIAS, None)
+        assert router.allow_syncdb(MASTER_DATABASE, None)
         assert not router.allow_syncdb(get_slave(), None)
+
+    def test_allow_syncdb_setting(self):
+        router = MasterSlaveRouter()
+        load_setting('MASTER_DB_ALLOW_SYNC', True)
+        assert router.allow_syncdb(MASTER_DATABASE, None)
+        load_setting('MASTER_DB_ALLOW_SYNC', False)
+        assert not router.allow_syncdb(MASTER_DATABASE, None)
+        clear_setting('MASTER_DB_ALLOW_SYNC')
 
 
 class SettingsTests(TestCase):
@@ -46,6 +79,18 @@ class SettingsTests(TestCase):
     def test_pinning_seconds_default(self):
         """Make sure the cookie age has the right default."""
         eq_(PINNING_SECONDS, 15)
+
+    def test_master_database_default(self):
+        """Make sure master database defaults to default"""
+        eq_(MASTER_DATABASE, DEFAULT_DB_ALIAS)
+
+    def test_allow_sync_default(self):
+        """Make sure allow sync option defaults to True"""
+        eq_(MASTER_DB_ALLOW_SYNC, True)
+
+    def test_allowed_apps_default(self):
+        """Make sure allowed apps defaults to None"""
+        assert not multidb.apps
 
 
 class PinningTests(UnpinningTestCase):
@@ -70,24 +115,31 @@ class PinningTests(UnpinningTestCase):
         not."""
         router = PinningMasterSlaveRouter()
 
-        eq_(router.db_for_read(None), get_slave())
+        eq_(router.db_for_read(TestModel), get_slave())
 
         pin_this_thread()
-        eq_(router.db_for_read(None), DEFAULT_DB_ALIAS)
+        eq_(router.db_for_read(TestModel), MASTER_DATABASE)
+
+    def test_db_for_read_allowed_apps(self):
+        load_setting('MULTIDB_APPS', ['myapp'])
+        eq_(PinningMasterSlaveRouter().db_for_read(TestModel), get_slave())
+        load_setting('MULTIDB_APPS', ['anotherapp'])
+        assert not PinningMasterSlaveRouter().db_for_read(TestModel)
+        clear_setting('MULTIDB_APPS')
 
     def test_db_write_decorator(self):
 
         def read_view(req):
-            eq_(router.db_for_read(None), get_slave())
+            eq_(router.db_for_read(TestModel), get_slave())
             return HttpResponse()
 
         @db_write
         def write_view(req):
-            eq_(router.db_for_read(None), DEFAULT_DB_ALIAS)
+            eq_(router.db_for_read(TestModel), MASTER_DATABASE)
             return HttpResponse()
 
         router = PinningMasterSlaveRouter()
-        eq_(router.db_for_read(None), get_slave())
+        eq_(router.db_for_read(TestModel), get_slave())
         write_view(HttpRequest())
         read_view(HttpRequest())
 
