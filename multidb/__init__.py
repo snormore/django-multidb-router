@@ -59,6 +59,9 @@ def get_slave():
     """Returns the alias of a slave database."""
     return slaves.next()
 
+def slaves_list():
+    return dbs
+
 
 class MasterSlaveRouter(object):
     """Router that sends all reads to a slave, all writes to default."""
@@ -77,7 +80,11 @@ class MasterSlaveRouter(object):
 
     def allow_syncdb(self, db, model):
         """Only allow syncdb on the master."""
-        return db == MASTER_DATABASE and MASTER_DB_ALLOW_SYNC
+        if db == MASTER_DATABASE:
+            return MASTER_DB_ALLOW_SYNC
+        if db in slaves_list():
+            return False
+        return None
 
 
 class PinningMasterSlaveRouter(MasterSlaveRouter):

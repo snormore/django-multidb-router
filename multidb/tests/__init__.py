@@ -54,11 +54,11 @@ class MasterSlaveRouterTests(TestCase):
         clear_setting('MULTIDB_APPS')
 
     def test_allow_syncdb(self):
-        """Make sure allow_syncdb() does the right thing for both masters and
-        slaves"""
+        """Make sure allow_syncdb() does the right thing for both masters and slaves"""
         router = MasterSlaveRouter()
         assert router.allow_syncdb(MASTER_DATABASE, None)
-        assert not router.allow_syncdb(get_slave(), None)
+        assert router.allow_syncdb(get_slave(), None) == False
+        assert router.allow_syncdb('other', None) == None
 
     def test_allow_syncdb_setting(self):
         router = MasterSlaveRouter()

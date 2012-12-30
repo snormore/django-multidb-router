@@ -13,6 +13,10 @@ DATABASES = {
         'NAME': 'slave',
         'ENGINE': 'django.db.backends.sqlite3',
     },
+    'other': {
+        'NAME': 'other',
+        'ENGINE': 'django.db.backends.sqlite3',
+    }
 }
 
 # Put the aliases for slave databases in this list.
